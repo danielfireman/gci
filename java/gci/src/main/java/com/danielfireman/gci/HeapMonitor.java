@@ -28,7 +28,7 @@ class HeapMonitor {
     }
 
     /**
-     * @return Heap used.
+     * @return Amount of heap being used.
      * @see Usage
      */
     Usage getUsage() {
