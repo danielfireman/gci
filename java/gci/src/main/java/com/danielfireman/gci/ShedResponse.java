@@ -3,7 +3,7 @@ package com.danielfireman.gci;
 import java.time.Duration;
 
 /**
- * Holds the response of processing a single request from {@code GcControlInterceptor}.
+ * Holds the response of processing a single request from {@code GarbageCollectorControlInterceptor}.
  * @author danielfireman
  */
 public class ShedResponse {

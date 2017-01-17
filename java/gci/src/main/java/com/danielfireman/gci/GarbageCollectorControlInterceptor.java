@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * @author danielfireman
  */
-public class GcControlInterceptor {
+public class GarbageCollectorControlInterceptor {
     private static final float SHEDDING_THRESHOLD = 0.5f;
     private static final long MAX_SAMPLE_WINDOW_SIZE = 400L;
     private static final long MIN_SAMPLE_WINDOW_SIZE = 40L;
@@ -36,14 +36,14 @@ public class GcControlInterceptor {
     private Clock clock;
 
     /**
-     * Creates a new instance of {@code GcControlInterceptor}
+     * Creates a new instance of {@code GarbageCollectorControlInterceptor}
      *
      * @param monitor   {@code HeapMonitor} used to monitoring JVM heap pools.
      * @param pool      thread pool used to trigger/control garbage collection.
      * @param collector Garbage collector to be triggered by the control interceptor.
      * @param clock     System clock abstraction.
      */
-    public GcControlInterceptor(HeapMonitor monitor, GarbageCollector collector, ExecutorService pool, Clock clock) {
+    public GarbageCollectorControlInterceptor(HeapMonitor monitor, GarbageCollector collector, ExecutorService pool, Clock clock) {
         this.monitor = monitor;
         this.collector = collector;
         this.pool = pool;
@@ -51,14 +51,14 @@ public class GcControlInterceptor {
     }
 
     /**
-     * Creates a new instance of {@code GcControlInterceptor} using defaults.
+     * Creates a new instance of {@code GarbageCollectorControlInterceptor} using defaults.
      *
      * @see HeapMonitor
      * @see System#gc()
      * @see Executors#newSingleThreadExecutor()
      * @see Clock#systemDefaultZone()
      */
-    public GcControlInterceptor() {
+    public GarbageCollectorControlInterceptor() {
         this(new HeapMonitor(), () -> System.gc(), Executors.newSingleThreadExecutor(), Clock.systemDefaultZone());
     }
 
@@ -116,7 +116,7 @@ public class GcControlInterceptor {
         return PROCESS_REQUEST;
     }
 
-    public void post(ShedResponse response) {
+    public void after(ShedResponse response) {
         if (!response.shouldShed) {
             finished.incrementAndGet();
         }
