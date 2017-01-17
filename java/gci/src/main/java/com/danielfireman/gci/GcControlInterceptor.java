@@ -20,6 +20,9 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class GcControlInterceptor {
     private static final float SHEDDING_THRESHOLD = 0.5f;
+    private static final long MAX_SAMPLE_WINDOW_SIZE = 400L;
+    private static final long MIN_SAMPLE_WINDOW_SIZE = 40L;
+    private static final long WAIT_FOR_TRAILERS_SLEEP_MILLIS = 50;
     private static final ShedResponse PROCESS_REQUEST = new ShedResponse(false, null);
     private Histogram unavailabilityHistogram = new Histogram(new SlidingWindowReservoir(10));
     private AtomicLong unavailabilityStartTime = new AtomicLong(0);
@@ -33,9 +36,9 @@ public class GcControlInterceptor {
     private Clock clock;
 
     /**
-     * Creates a new instance of <code>GcControlInterceptor</code>.
+     * Creates a new instance of {@code GcControlInterceptor}
      *
-     * @param monitor   <code>HeapMonitor</code> used to monitoring JVM heap pools.
+     * @param monitor   {@code HeapMonitor} used to monitoring JVM heap pools.
      * @param pool      thread pool used to trigger/control garbage collection.
      * @param collector Garbage collector to be triggered by the control interceptor.
      * @param clock     System clock abstraction.
@@ -48,7 +51,7 @@ public class GcControlInterceptor {
     }
 
     /**
-     * Creates a new instance of <code>GcControlInterceptor</code> using defaults:
+     * Creates a new instance of {@code GcControlInterceptor} using defaults.
      *
      * @see HeapMonitor
      * @see System#gc()
@@ -80,25 +83,27 @@ public class GcControlInterceptor {
                     // This should return immediately. We don't want to block inside the synchronized block.
                     pool.execute(() -> {
                         // Calculating next sample rate.
-                        // The main idea is to get 1/10th of the requests that arrived since last GC and bound
-                        // this number to [40, 400]. We don't want to take too long that a load peak could happen
-                        // and we don't want it to be too often that would lead to a performance damage.
-                        // TODO(danielfireman): Make max and min configurable.
-                        sampleRate.set(Math.min(400L, Math.max(40L, (long) ((double) incoming.get() / 5d))));
+                        // The main idea is to get 20% of the requests that arrived since last GC and bound
+                        // this number to [MIN_SAMPLE_WINDOW_SIZE, MAX_SAMPLE_WINDOW_SIZE]. We don't want to take
+                        // too long that a load peak could happen and we don't want it to be too often that
+                        // would lead to a performance damage.
+                        sampleRate.set(Math.min(
+                                MAX_SAMPLE_WINDOW_SIZE,
+                                Math.max(MIN_SAMPLE_WINDOW_SIZE, (long) ((double) incoming.get() / 5d))));
 
                         // Loop waiting for the queue to get empty.
                         while (finished.get() < incoming.get()) {
                             try {
-                                Thread.sleep(50);
+                                Thread.sleep(WAIT_FOR_TRAILERS_SLEEP_MILLIS);
                             } catch (InterruptedException ie) {
                                 throw new RuntimeException(ie);
                             }
                         }
 
-                        // Finally GC.
+                        // Finally, collect the garbage.
                         collector.collect();
 
-                        // Wrap things up and get a fresh start for a new sliding window.
+                        // Wrap things up and update the unavailability duration histogram.
                         unavailabilityHistogram.update(clock.millis() - unavailabilityStartTime.get());
                         incoming.set(0);
                         finished.set(0);
