@@ -22,8 +22,17 @@ public class JoobyGciFilter implements Route.Filter {
     private GarbageCollectorControlInterceptor gci;
 
     @Inject
-    JoobyGciFilter(GarbageCollectorControlInterceptor gci) {
+    public JoobyGciFilter(GarbageCollectorControlInterceptor gci) {
+        System.out.println("Garbage Collector Control Interceptor activated.");
         this.gci = gci;
+    }
+
+    /**
+     * Creates a new {@code JoobyGciFilter} with default parameters
+     * @see com.danielfireman.gci.GarbageCollectorControlInterceptor#GarbageCollectorControlInterceptor()
+     */
+    public JoobyGciFilter() {
+        this(new GarbageCollectorControlInterceptor());
     }
 
     public void handle(Request request, Response response, Route.Chain chain) throws Throwable {
