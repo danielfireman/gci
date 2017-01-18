@@ -80,6 +80,9 @@ public class GarbageCollectorControlInterceptor {
                     doingGC.set(true);
                     unavailabilityStartTime.set(clock.millis());
 
+                    // Making sure the request is not interrupted by GC.
+                    incoming.incrementAndGet();
+
                     // This should return immediately. We don't want to block inside the synchronized block.
                     pool.execute(() -> {
                         // Calculating next sample rate.
@@ -109,6 +112,7 @@ public class GarbageCollectorControlInterceptor {
                         finished.set(0);
                         doingGC.set(false);
                     });
+                    return PROCESS_REQUEST;
                 }
             }
         }
