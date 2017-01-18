@@ -13,7 +13,7 @@ public class App extends Jooby {
 
     {
         use("GET", "*", new JoobyGciFilter());
-        get("/", () -> "Hello World!");
+        get("/", () -> "Hello Garbage Collector Control Interceptor");
     }
 
     public static void main(final String[] args) {
