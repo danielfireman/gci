@@ -29,10 +29,8 @@ public class SpringGciInterceptor extends HandlerInterceptorAdapter {
             HttpServletResponse response,
             Object o)
             throws Exception {
-        System.out.print("Got it");
         ShedResponse shedResponse = gci.before();
         if (shedResponse.shouldShed) {
-            System.out.println("\n\n SHED \n\n");
             String duration = Double.toString(((double) shedResponse.unavailabilityDuration.toMillis()) / 1000d);
             response.addHeader("Retry-After", duration);
             response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
