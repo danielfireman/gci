@@ -1,12 +1,7 @@
 package com.danielfireman.gci;
 
-import com.codahale.metrics.Histogram;
-import com.codahale.metrics.SlidingWindowReservoir;
-import com.codahale.metrics.Snapshot;
-
-import java.time.Clock;
 import java.time.Duration;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,30 +19,32 @@ public class GarbageCollectorControlInterceptor {
     private static final long MIN_SAMPLE_WINDOW_SIZE = 40L;
     private static final long WAIT_FOR_TRAILERS_SLEEP_MILLIS = 50;
     private static final ShedResponse PROCESS_REQUEST = new ShedResponse(false, null);
-    private Histogram unavailabilityHistogram = new Histogram(new SlidingWindowReservoir(10));
-    private AtomicLong unavailabilityStartTime = new AtomicLong(0);
+    AtomicBoolean doingGC = new AtomicBoolean(false);  // Package private to make testing easier.
     private AtomicLong incoming = new AtomicLong();
     private AtomicLong finished = new AtomicLong();
     private AtomicLong sampleRate = new AtomicLong(10);
-    private AtomicBoolean doingGC = new AtomicBoolean(false);
     private HeapMonitor monitor;
     private GarbageCollector collector;
-    private ExecutorService pool;
-    private Clock clock;
+    private Executor executor;
+    private UnavailabilityDuration unavailabilityDuration;
 
     /**
      * Creates a new instance of {@code GarbageCollectorControlInterceptor}
      *
-     * @param monitor   {@code HeapMonitor} used to monitoring JVM heap pools.
-     * @param pool      thread pool used to trigger/control garbage collection.
-     * @param collector Garbage collector to be triggered by the control interceptor.
-     * @param clock     System clock abstraction.
+     * @param monitor                {@code HeapMonitor} used to monitoring JVM heap pools.
+     * @param executor               thread pool used to trigger/control garbage collection.
+     * @param collector              Garbage collector to be triggered by the control interceptor.
+     * @param unavailabilityDuration Keeps track and estimates unavailability periods.
      */
-    public GarbageCollectorControlInterceptor(HeapMonitor monitor, GarbageCollector collector, ExecutorService pool, Clock clock) {
+    public GarbageCollectorControlInterceptor(
+            HeapMonitor monitor,
+            GarbageCollector collector,
+            Executor executor,
+            UnavailabilityDuration unavailabilityDuration) {
         this.monitor = monitor;
         this.collector = collector;
-        this.pool = pool;
-        this.clock = clock;
+        this.executor = executor;
+        this.unavailabilityDuration = unavailabilityDuration;
     }
 
     /**
@@ -56,10 +53,10 @@ public class GarbageCollectorControlInterceptor {
      * @see HeapMonitor
      * @see System#gc()
      * @see Executors#newSingleThreadExecutor()
-     * @see Clock#systemDefaultZone()
+     * @see UnavailabilityDuration
      */
     public GarbageCollectorControlInterceptor() {
-        this(new HeapMonitor(), () -> System.gc(), Executors.newSingleThreadExecutor(), Clock.systemDefaultZone());
+        this(new HeapMonitor(), () -> System.gc(), Executors.newSingleThreadExecutor(), new UnavailabilityDuration());
     }
 
     private static ShedResponse shedRequest(Duration unavailabilityDuration) {
@@ -68,23 +65,23 @@ public class GarbageCollectorControlInterceptor {
 
     public ShedResponse before() {
         if (doingGC.get()) {
-            return shedRequest(getUnavailabilityDuration());
+            return shedRequest(unavailabilityDuration.estimate());
         }
         if (incoming.get() % sampleRate.get() == 0) {
             synchronized (this) {
                 if (doingGC.get()) {
-                    return shedRequest(getUnavailabilityDuration());
+                    return shedRequest(unavailabilityDuration.estimate());
                 }
                 HeapMonitor.Usage usage = monitor.getUsage();
                 if (usage.tenured > SHEDDING_THRESHOLD || usage.young > SHEDDING_THRESHOLD) {
                     doingGC.set(true);
-                    unavailabilityStartTime.set(clock.millis());
+                    unavailabilityDuration.begin();
 
                     // Making sure the request is not interrupted by GC.
                     incoming.incrementAndGet();
 
                     // This should return immediately. We don't want to block inside the synchronized block.
-                    pool.execute(() -> {
+                    executor.execute(() -> {
                         // Calculating next sample rate.
                         // The main idea is to get 20% of the requests that arrived since last GC and bound
                         // this number to [MIN_SAMPLE_WINDOW_SIZE, MAX_SAMPLE_WINDOW_SIZE]. We don't want to take
@@ -107,7 +104,7 @@ public class GarbageCollectorControlInterceptor {
                         collector.collect();
 
                         // Wrap things up and update the unavailability duration histogram.
-                        unavailabilityHistogram.update(clock.millis() - unavailabilityStartTime.get());
+                        unavailabilityDuration.end();
                         incoming.set(0);
                         finished.set(0);
                         doingGC.set(false);
@@ -124,11 +121,5 @@ public class GarbageCollectorControlInterceptor {
         if (!response.shouldShed) {
             finished.incrementAndGet();
         }
-    }
-
-    private Duration getUnavailabilityDuration() {
-        long delta = clock.millis() - unavailabilityStartTime.get();
-        Snapshot s = unavailabilityHistogram.getSnapshot();
-        return Duration.ofMillis((long) Math.max(0, (s.getMedian() + s.getStdDev() - delta)));
     }
 }
