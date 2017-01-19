@@ -2,8 +2,8 @@ package com.danielfireman.gci.spring;
 
 import com.danielfireman.gci.GarbageCollectorControlInterceptor;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * Spring {@link Configuration} to be exported by the application that would
@@ -12,7 +12,6 @@ import org.springframework.context.annotation.ComponentScan;
  * @author danielfireman
  * @see SpringGciInterceptor
  */
-
 @Configuration
 @ComponentScan
 public class SpringGciInterceptorConfiguration {
