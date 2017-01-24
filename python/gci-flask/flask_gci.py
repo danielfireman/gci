@@ -20,14 +20,13 @@ from gci import GarbageCollectorInterceptor
 _gci = GarbageCollectorInterceptor()
 
 
-def before():
-    shed_response = _gci.before()
-    g._shed_response = shed_response
-    if shed_response.should_shed:
-        return Response(status=503, headers={"Retry-After": str(shed_response.unavailability_duration.total_seconds())})
+def before_request():
+    unavailability_duration = _gci.before_request()
+    if unavailability_duration:
+        g._unavailability_duration = unavailability_duration
+        return Response(status=503, headers={"Retry-After": str(unavailability_duration.total_seconds())})
     return None
 
 
-def after(response):
-    _gci.after(getattr(g, "_shed_response", None))
-    return response
+def after_response(exception=None):
+    _gci.after_response(getattr(g, "_unavailability_duration", None))
