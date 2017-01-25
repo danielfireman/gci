@@ -37,20 +37,27 @@ class GarbageCollectorInterceptor:
     def before_request(self, filename=None):
         """Method that should be called before request processing.
 
-        Returns a ShedResponse whether the current request should be evicted"""
+        Returns a datetime.timedelta if representing the unavailability delay of the service after attending to this
+        request. Or None if the execution will proceed without interruption."""
+
+        # TODO(danielfireman): Use sampling window
         virt, rss = self._get_meminfo(filename)
+        if virt == 0.0 or rss == 0.0:
+            return None
 
         # CPython runtime's virtual address space increases automatically as needed, that makes
         # difficult to predictably collect garbage based on memory consumption. To mitigate that,
-        # GCI is only going to update virtual memory consumption first time it is called
+        # GCI is only going to update virtual memory consumption first time it is called and
         # after GC collection.
         if not self._virt:
             self._virt = virt
 
-        # TODO(danielfireman): Use sampling window
+        # From: https://utcc.utoronto.ca/~cks/space/blog/linux/LinuxMemoryStats
+        # "If you have a memory leak it's routine for your RSS to stay constant while your VSZ grows. After all, you
+        # aren't looking at that leaked memory any more."
+        # GCI simply can not work under these circumstances. So, lets re-enable automatic GC and wait for the bug
+        # fixed on the next release.
         # TODO(danielfireman): Disable GCI and enable automatic GC if there is a memory leak.
-        # The rationale here is to be no worse than automatic GC in extreme cases (like
-        # coding bugs)
         if rss / self._virt > _SHEDDING_THRESHOLD:
             # TODO(danielfireman): Keep standard deviation of unavailability durations and consider it.
             return timedelta(seconds=self._last_unavailability_duration_secs)
@@ -58,10 +65,13 @@ class GarbageCollectorInterceptor:
         return None
 
     def after_response(self, shed_response):
-        # NOTE: teardown callbacks are always executed, even if before-request
+        # NOTE on flask usage: teardown callbacks are always executed, even if before-request
         # callbacks were not executed yet but an exception happened.
         # More info at: http://flask.pocoo.org/docs/0.12/reqcontext/#teardown-callbacks
-        if shed_response and shed_response.should_shed:
+        if not shed_response:
+            return
+
+        if shed_response.should_shed:
             start_time = time.time()
             gc.collect()
             self._last_unavailability_duration_secs = time.time() - start_time
