@@ -29,4 +29,4 @@ def before_request():
 
 
 def after_response(exception=None):
-    _gci.after_response(getattr(g, "_unavailability_duration", None))
+    _gci.after_response(hasattr(g, "_unavailability_duration"))
