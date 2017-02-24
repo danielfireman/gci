@@ -32,9 +32,9 @@ public class UnavailabilityDurationTest {
         UnavailabilityDuration duration = new UnavailabilityDuration(clock);
         duration.begin();
         duration.end();
-
         assertEquals(Duration.ZERO, duration.estimate());
-        verify(clock, times(3));
+
+        verify(clock, times(3)).millis();
     }
 
     @Test
@@ -51,8 +51,8 @@ public class UnavailabilityDurationTest {
         duration.end();
         duration.begin();
         duration.end();
-
         assertEquals(5, duration.estimate().toMillis());
+
         verify(clock, times(5)).millis();
     }
 }

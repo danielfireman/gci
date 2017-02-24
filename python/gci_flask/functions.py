@@ -6,18 +6,13 @@ Example:
     def hello():
         return "Hello World!"
 """
-import os
-import sys
+
 from flask import Response
 from flask import g
 
-# TODO(danielfireman): Improve this importing hack. Most likely the best option is to upload to PIP.
-# Importing gci relative to gci-flask
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '../gci')))
+from ..gci import gci
 
-from gci import GarbageCollectorInterceptor
-
-_gci = GarbageCollectorInterceptor()
+_gci = gci.GarbageCollectorInterceptor()
 
 
 def before_request():
