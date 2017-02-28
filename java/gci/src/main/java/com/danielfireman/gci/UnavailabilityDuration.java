@@ -1,14 +1,7 @@
 package com.danielfireman.gci;
 
-import com.codahale.metrics.Histogram;
-import com.codahale.metrics.SlidingWindowReservoir;
-import com.codahale.metrics.Snapshot;
-
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Supplier;
 
 /**
  * Estimates the unavailability duration of a given service based
@@ -17,13 +10,12 @@ import java.util.function.Supplier;
  * @author danielfireman
  */
 class UnavailabilityDuration {
-
     private Clock clock;
-    private Histogram unavailabilityHistogram = new Histogram(new SlidingWindowReservoir(10));
-    private AtomicLong unavailabilityStartTime = new AtomicLong(0);
+    private double count, startTime, oldMean, newMean, oldVar, newVar;
 
     /**
      * Creates a new {@link UnavailabilityDuration} instance.
+     *
      * @param clock System clock.
      */
     UnavailabilityDuration(Clock clock) {
@@ -45,23 +37,38 @@ class UnavailabilityDuration {
      *
      * @return next unavailability duration estimate.
      */
-    Duration estimate() {
-        double delta = clock.millis() - unavailabilityStartTime.get();
-        Snapshot s = unavailabilityHistogram.getSnapshot();
-        return Duration.ofMillis((long) Math.max(0, s.getMedian() + s.getStdDev() - delta));
+    synchronized Duration estimate() {
+        double delta = clock.millis() - startTime;
+        double stddev = Math.sqrt((count > 1) ? newVar / (count - 1) : 0.0);
+        double mean = (count > 0) ? newMean : 0.0;
+        return Duration.ofMillis((long) Math.max(0, mean + stddev - delta));
     }
 
     /**
      * Flags that an unavailability period has begun.
      */
     synchronized void begin() {
-        unavailabilityStartTime.set(clock.millis());
+        startTime = clock.millis();
     }
 
     /**
      * Flags that the last unavailability period has ended.
      */
     synchronized void end() {
-        unavailabilityHistogram.update(clock.millis() - unavailabilityStartTime.get());
+        // Fast and more accurate (compared to the naive approach) way of computing variance. Proposed by
+        // B. P. Welford and presented in Donald Knuth’s Art of Computer Programming, Vol 2, page 232, 3rd
+        // edition.
+        // Another explanation: https://www.embeddedrelated.com/showarticle/785.php
+        count++;
+        double value = clock.millis() - startTime;
+        if (count == 1) {
+            oldMean = newMean = value;
+            oldVar = 0.0;
+        } else {
+            newMean = oldMean + (value - oldMean) / count;
+            newVar = oldVar + (value - oldMean) * (value - newMean);
+            oldMean = newMean;
+            oldVar = newVar;
+        }
     }
 }
