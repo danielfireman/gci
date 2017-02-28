@@ -1,17 +1,27 @@
 package com.danielfireman.gci.elasticsearch;
 
+import com.danielfireman.gci.GarbageCollectorControlInterceptor;
+import com.danielfireman.gci.ShedResponse;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilterChain;
+import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.rest.BytesRestResponse;
 import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.tasks.Task;
 
 public class GciFilter implements ActionFilter {
+
+    private GarbageCollectorControlInterceptor gci;
+
+    @Inject
+    public GciFilter(GarbageCollectorControlInterceptor gci) {
+        this.gci = gci;
+    }
 
     // GCI must be the first filter.
     @Override
@@ -27,10 +37,16 @@ public class GciFilter implements ActionFilter {
                 chain.proceed(task, action, request, listener);
                 return;
             }
-            // TODO(danielfireman): Use GCI to decide whether to shed the request and send a response back.
-            // BytesRestResponse resp = new BytesRestResponse(RestStatus.OK, "Boo");
-            // channel.sendResponse(resp);
-            // return;
+            ShedResponse shedResponse = gci.before();
+            if (shedResponse.shouldShed) {
+                BytesRestResponse resp = new BytesRestResponse(RestStatus.SERVICE_UNAVAILABLE, "");
+                String duration = Double.toString(((double) shedResponse.unavailabilityDuration.toMillis()) / 1000d);
+                resp.addHeader("Retry-After", duration);
+                gci.after(shedResponse);
+                channel.sendResponse(resp);
+                return;
+            }
+            gci.after(shedResponse);
         }
         chain.proceed(task, action, request, listener);
     }

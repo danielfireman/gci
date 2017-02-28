@@ -8,7 +8,7 @@
     <name>gci-elasticsearch</name>
     <url>http://maven.apache.org</url>
     <properties>
-        <elasticsearch.version>5.2.1</elasticsearch.version>
+        <elasticsearch.version>5.2.0</elasticsearch.version>
     </properties>
     <build>
         <resources>
@@ -101,12 +101,11 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <!--<dependency>
+        <dependency>
             <groupId>com.danielfireman</groupId>
             <artifactId>gci</artifactId>
             <version>0.1</version>
         </dependency>
-        -->
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>rest</artifactId>
