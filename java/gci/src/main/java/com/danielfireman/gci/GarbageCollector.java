@@ -6,6 +6,6 @@ package com.danielfireman.gci;
  * @author danielfireman
  */
 @FunctionalInterface
-interface GarbageCollector {
+public interface GarbageCollector {
     void collect();
 }

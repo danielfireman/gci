@@ -9,7 +9,7 @@ import java.time.Duration;
  *
  * @author danielfireman
  */
-class UnavailabilityDuration {
+public class UnavailabilityDuration {
     private Clock clock;
     private double count, startTime, oldMean, newMean, oldVar, newVar;
 
@@ -18,7 +18,7 @@ class UnavailabilityDuration {
      *
      * @param clock System clock.
      */
-    UnavailabilityDuration(Clock clock) {
+    public UnavailabilityDuration(Clock clock) {
         this.clock = clock;
     }
 

@@ -22,7 +22,7 @@ public class UnavailabilityDurationTest {
     @Mock
     Clock clock;
 
-    /*
+
     @Test
     public void testDurationIsAlwaysNonNegative() {
         when(clock.millis())
@@ -36,7 +36,7 @@ public class UnavailabilityDurationTest {
         assertEquals(Duration.ZERO, duration.estimate());
 
         verify(clock, times(3)).millis();
-    }*/
+    }
 
     @Test
     public void testDuration() {

@@ -9,11 +9,11 @@ import java.lang.management.MemoryUsage;
  *
  * @author danielfireman
  */
-class HeapMonitor {
+public class HeapMonitor {
     private MemoryPoolMXBean youngPool;
     private MemoryPoolMXBean tenuredPool;
 
-    HeapMonitor() {
+    public HeapMonitor() {
         for (final MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
             // TODO(danielfireman): Generalize this to other JVM versions.
             if (pool.getName().contains("Eden")) {

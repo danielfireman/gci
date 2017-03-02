@@ -14,15 +14,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author danielfireman
  */
 public class GarbageCollectorControlInterceptor {
-    private static final float SHEDDING_THRESHOLD = 0.5f;
+    private static final float SHEDDING_THRESHOLD = 0.1f;
     private static final long MAX_SAMPLE_WINDOW_SIZE = 400L;
-    private static final long MIN_SAMPLE_WINDOW_SIZE = 40L;
-    private static final long WAIT_FOR_TRAILERS_SLEEP_MILLIS = 50;
+    private static final long MIN_SAMPLE_WINDOW_SIZE = 5L;
+    private static final Duration WAIT_FOR_TRAILERS_SLEEP_MILLIS = Duration.ofMillis(10);
+    private static final Duration DEFAULT_UNAVAILABILITY_DURATION = Duration.ofMillis(100);
     private static final ShedResponse PROCESS_REQUEST = new ShedResponse(false, null);
     AtomicBoolean doingGC = new AtomicBoolean(false);  // Package private to make testing easier.
     private AtomicLong incoming = new AtomicLong();
     private AtomicLong finished = new AtomicLong();
-    private AtomicLong sampleRate = new AtomicLong(10);
+    private AtomicLong sampleRate = new AtomicLong(50);
     private HeapMonitor monitor;
     private GarbageCollector collector;
     private Executor executor;
@@ -60,7 +61,11 @@ public class GarbageCollectorControlInterceptor {
     }
 
     private static ShedResponse shedRequest(Duration unavailabilityDuration) {
-        return new ShedResponse(true, unavailabilityDuration);
+        if (unavailabilityDuration.isZero() || unavailabilityDuration.isNegative()) {
+            return new ShedResponse(true, DEFAULT_UNAVAILABILITY_DURATION);
+        }
+        // TODO(danielfireman): Currently fixing entropy in 10%.
+        return new ShedResponse(true, Duration.ofMillis((long) (unavailabilityDuration.toMillis() * 1.1)));
     }
 
     public ShedResponse before() {
@@ -68,33 +73,21 @@ public class GarbageCollectorControlInterceptor {
             return shedRequest(unavailabilityDuration.estimate());
         }
         if (incoming.get() % sampleRate.get() == 0) {
-            synchronized (this) {
-                if (doingGC.get()) {
-                    return shedRequest(unavailabilityDuration.estimate());
-                }
-                HeapMonitor.Usage usage = monitor.getUsage();
-                if (usage.tenured > SHEDDING_THRESHOLD || usage.young > SHEDDING_THRESHOLD) {
+            HeapMonitor.Usage usage = monitor.getUsage();
+            if (usage.tenured > SHEDDING_THRESHOLD || usage.young > SHEDDING_THRESHOLD) {
+                synchronized (this) {
+                    if (doingGC.get()) {
+                        return shedRequest(unavailabilityDuration.estimate());
+                    }
                     doingGC.set(true);
                     unavailabilityDuration.begin();
-
-                    // Making sure the request is not interrupted by GC.
-                    incoming.incrementAndGet();
-
-                    // This should return immediately. We don't want to block inside the synchronized block.
                     executor.execute(() -> {
-                        // Calculating next sample rate.
-                        // The main idea is to get 20% of the requests that arrived since last GC and bound
-                        // this number to [MIN_SAMPLE_WINDOW_SIZE, MAX_SAMPLE_WINDOW_SIZE]. We don't want to take
-                        // too long that a load peak could happen and we don't want it to be too often that
-                        // would lead to a performance damage.
-                        sampleRate.set(Math.min(
-                                MAX_SAMPLE_WINDOW_SIZE,
-                                Math.max(MIN_SAMPLE_WINDOW_SIZE, (long) ((double) incoming.get() / 5d))));
+                        long incomingSnapshot = incoming.get();
 
                         // Loop waiting for the queue to get empty.
                         while (finished.get() < incoming.get()) {
                             try {
-                                Thread.sleep(WAIT_FOR_TRAILERS_SLEEP_MILLIS);
+                                Thread.sleep(WAIT_FOR_TRAILERS_SLEEP_MILLIS.toMillis());
                             } catch (InterruptedException ie) {
                                 throw new RuntimeException(ie);
                             }
@@ -102,15 +95,21 @@ public class GarbageCollectorControlInterceptor {
 
                         // Finally, collect the garbage.
                         collector.collect();
-
-                        // Wrap things up and update the unavailability duration histogram.
                         unavailabilityDuration.end();
-                        incoming.set(0);
-                        finished.set(0);
+
+                        // Calculating next sample rate.
+                        // The main idea is to get 20% of the requests that arrived since last GC and bound
+                        // this number to [MIN_SAMPLE_WINDOW_SIZE, MAX_SAMPLE_WINDOW_SIZE]. We don't want to take
+                        // too long that a load peak could happen and we don't want it to be too often that
+                        // would lead to a performance damage.
+                        sampleRate.set(Math.min(
+                                MAX_SAMPLE_WINDOW_SIZE,
+                                Math.max(MIN_SAMPLE_WINDOW_SIZE, (long) ((double) incomingSnapshot / 10d))));
+
                         doingGC.set(false);
                     });
-                    return PROCESS_REQUEST;
                 }
+                return shedRequest(unavailabilityDuration.estimate());
             }
         }
         incoming.incrementAndGet();

@@ -1,7 +1,9 @@
 package com.danielfireman.gci.elasticsearch;
 
 import com.danielfireman.gci.GarbageCollectorControlInterceptor;
+import com.danielfireman.gci.HeapMonitor;
 import com.danielfireman.gci.ShedResponse;
+import com.danielfireman.gci.UnavailabilityDuration;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
@@ -14,13 +16,20 @@ import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.tasks.Task;
 
+import java.time.Clock;
+import java.util.concurrent.Executors;
+
 public class GciFilter implements ActionFilter {
 
     private GarbageCollectorControlInterceptor gci;
 
     @Inject
-    public GciFilter(GarbageCollectorControlInterceptor gci) {
-        this.gci = gci;
+    public GciFilter() {
+        this.gci = new GarbageCollectorControlInterceptor(
+                new HeapMonitor(),
+                () -> System.gc(),
+                Executors.newSingleThreadExecutor(),
+                new UnavailabilityDuration(Clock.systemDefaultZone()));
     }
 
     // GCI must be the first filter.
@@ -31,23 +40,34 @@ public class GciFilter implements ActionFilter {
 
     @Override
     public <Request extends ActionRequest, Response extends ActionResponse> void apply(Task task, String action, Request request, ActionListener<Response> listener, ActionFilterChain<Request, Response> chain) {
-        if (request.getClass().equals(SearchRequest.class)) {
-            RestChannel channel = ThreadRepo.channel.get();
-            if (channel == null) {
-                chain.proceed(task, action, request, listener);
-                return;
-            }
-            ShedResponse shedResponse = gci.before();
-            if (shedResponse.shouldShed) {
-                BytesRestResponse resp = new BytesRestResponse(RestStatus.SERVICE_UNAVAILABLE, "");
-                String duration = Double.toString(((double) shedResponse.unavailabilityDuration.toMillis()) / 1000d);
-                resp.addHeader("Retry-After", duration);
-                gci.after(shedResponse);
-                channel.sendResponse(resp);
-                return;
-            }
-            gci.after(shedResponse);
+        // Only act on search requests.
+        if (!request.getClass().equals(SearchRequest.class)) {
+            chain.proceed(task, action, request, listener);
+            return;
         }
-        chain.proceed(task, action, request, listener);
+        // Only shed what is needed.
+        ShedResponse shedResponse = gci.before();
+        if (!shedResponse.shouldShed) {
+            gci.after(shedResponse);
+            chain.proceed(task, action, request, listener);
+            return;
+        }
+        // If there is any problem getting the channel from threadlocal.
+        // This will happen if the GCIPlugin is not the only action plugin registered. See ES ActionModule
+        // for more details.
+        RestChannel channel = ThreadRepo.channel.get();
+        if (channel == null) {
+            System.out.println("Null channel");
+            gci.after(shedResponse);
+            chain.proceed(task, action, request, listener);
+            return;
+        }
+        // Finally, shed.
+        BytesRestResponse resp = new BytesRestResponse(RestStatus.SERVICE_UNAVAILABLE, "");
+        String duration = Double.toString(((double) shedResponse.unavailabilityDuration.toMillis()) / 1000d);
+        resp.addHeader("Retry-After", duration);
+        channel.sendResponse(resp);
+        gci.after(shedResponse);
     }
+
 }
