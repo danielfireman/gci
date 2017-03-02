@@ -1,9 +1,7 @@
 package com.danielfireman.gci.elasticsearch;
 
 import com.danielfireman.gci.GarbageCollectorControlInterceptor;
-import com.danielfireman.gci.HeapMonitor;
 import com.danielfireman.gci.ShedResponse;
-import com.danielfireman.gci.UnavailabilityDuration;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
@@ -16,20 +14,13 @@ import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.tasks.Task;
 
-import java.time.Clock;
-import java.util.concurrent.Executors;
-
 public class GciFilter implements ActionFilter {
 
     private GarbageCollectorControlInterceptor gci;
 
     @Inject
-    public GciFilter() {
-        this.gci = new GarbageCollectorControlInterceptor(
-                new HeapMonitor(),
-                () -> System.gc(),
-                Executors.newSingleThreadExecutor(),
-                new UnavailabilityDuration(Clock.systemDefaultZone()));
+    public GciFilter(GarbageCollectorControlInterceptor gci) {
+        this.gci = gci;
     }
 
     // GCI must be the first filter.
