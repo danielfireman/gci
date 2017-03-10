@@ -38,10 +38,15 @@ public class UnavailabilityDuration {
      * @return next unavailability duration estimate.
      */
     synchronized Duration estimate() {
-        double delta = clock.millis() - startTime;
+        if (count <= 1) {
+            return Duration.ZERO;
+        }
         double stddev = Math.sqrt((count > 1) ? newVar / (count - 1) : 0.0);
         double mean = (count > 0) ? newMean : 0.0;
-        return Duration.ofMillis((long) Math.max(0, mean + stddev - delta));
+
+        // Three-sigma rule of thumb.
+        // https://en.wikipedia.org/wiki/68%E2%80%9395%E2%80%9399.7_rule
+        return Duration.ofMillis((long) Math.max(0, mean + (3*stddev)));
     }
 
     /**

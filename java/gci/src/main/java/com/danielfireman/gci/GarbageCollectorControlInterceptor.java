@@ -14,8 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author danielfireman
  */
 public class GarbageCollectorControlInterceptor {
-    private static final float SHEDDING_THRESHOLD = 0.1f;
-    private static final long MAX_SAMPLE_WINDOW_SIZE = 400L;
+    private static final float SHEDDING_THRESHOLD = 0.5f;
+    private static final long MAX_SAMPLE_WINDOW_SIZE = 100L;
     private static final long MIN_SAMPLE_WINDOW_SIZE = 5L;
     private static final Duration WAIT_FOR_TRAILERS_SLEEP_MILLIS = Duration.ofMillis(10);
     private static final Duration DEFAULT_UNAVAILABILITY_DURATION = Duration.ofMillis(100);
@@ -80,35 +80,36 @@ public class GarbageCollectorControlInterceptor {
                         return shedRequest(unavailabilityDuration.estimate());
                     }
                     doingGC.set(true);
-                    unavailabilityDuration.begin();
-                    executor.execute(() -> {
-                        long incomingSnapshot = incoming.get();
-
-                        // Loop waiting for the queue to get empty.
-                        while (finished.get() < incoming.get()) {
-                            try {
-                                Thread.sleep(WAIT_FOR_TRAILERS_SLEEP_MILLIS.toMillis());
-                            } catch (InterruptedException ie) {
-                                throw new RuntimeException(ie);
-                            }
-                        }
-
-                        // Finally, collect the garbage.
-                        collector.collect();
-                        unavailabilityDuration.end();
-
-                        // Calculating next sample rate.
-                        // The main idea is to get 20% of the requests that arrived since last GC and bound
-                        // this number to [MIN_SAMPLE_WINDOW_SIZE, MAX_SAMPLE_WINDOW_SIZE]. We don't want to take
-                        // too long that a load peak could happen and we don't want it to be too often that
-                        // would lead to a performance damage.
-                        sampleRate.set(Math.min(
-                                MAX_SAMPLE_WINDOW_SIZE,
-                                Math.max(MIN_SAMPLE_WINDOW_SIZE, (long) ((double) incomingSnapshot / 10d))));
-
-                        doingGC.set(false);
-                    });
                 }
+                executor.execute(() -> {
+                    // Deliberately counting the time waiting for trailer requests
+                    // as unavailability time.
+                    unavailabilityDuration.begin();
+                    long incomingSnapshot = incoming.get();
+
+                    // Loop waiting for the queue to get empty.
+                    while (finished.get() < incoming.get()) {
+                        try {
+                            Thread.sleep(WAIT_FOR_TRAILERS_SLEEP_MILLIS.toMillis());
+                        } catch (InterruptedException ie) {
+                            throw new RuntimeException(ie);
+                        }
+                    }
+
+                    // Finally, collect the garbage.
+                    collector.collect();
+                    unavailabilityDuration.end();
+
+                    // Calculating next sample rate.
+                    // The main idea is to get 20% of the requests that arrived since last GC and bound
+                    // this number to [MIN_SAMPLE_WINDOW_SIZE, MAX_SAMPLE_WINDOW_SIZE]. We don't want to take
+                    // too long that a load peak could happen and we don't want it to be too often that
+                    // would lead to a performance damage.
+                    sampleRate.set(Math.min(
+                            MAX_SAMPLE_WINDOW_SIZE,
+                            Math.max(MIN_SAMPLE_WINDOW_SIZE, (long) ((double) incomingSnapshot / 10d))));
+                    doingGC.set(false);
+                });
                 return shedRequest(unavailabilityDuration.estimate());
             }
         }

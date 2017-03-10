@@ -39,8 +39,8 @@ public class GciFilter implements ActionFilter {
         // Only shed what is needed.
         ShedResponse shedResponse = gci.before();
         if (!shedResponse.shouldShed) {
-            gci.after(shedResponse);
             chain.proceed(task, action, request, listener);
+            gci.after(shedResponse);
             return;
         }
         // If there is any problem getting the channel from threadlocal.
@@ -49,8 +49,8 @@ public class GciFilter implements ActionFilter {
         RestChannel channel = ThreadRepo.channel.get();
         if (channel == null) {
             System.out.println("Null channel");
-            gci.after(shedResponse);
             chain.proceed(task, action, request, listener);
+            gci.after(shedResponse);
             return;
         }
         // Finally, shed.
