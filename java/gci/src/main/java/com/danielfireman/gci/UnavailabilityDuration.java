@@ -10,8 +10,13 @@ import java.time.Duration;
  * @author danielfireman
  */
 public class UnavailabilityDuration {
+    private static final int HISTORY_SIZE = 20;
+    private static final float SAFETY_FACTOR = 2f;
     private Clock clock;
-    private double count, startTime, oldMean, newMean, oldVar, newVar;
+    private long startTime;
+    private Duration duration = Duration.ofMillis(100);
+    private long[] past = new long[HISTORY_SIZE];
+    private long count;
 
     /**
      * Creates a new {@link UnavailabilityDuration} instance.
@@ -38,15 +43,7 @@ public class UnavailabilityDuration {
      * @return next unavailability duration estimate.
      */
     synchronized Duration estimate() {
-        if (count <= 1) {
-            return Duration.ZERO;
-        }
-        double stddev = Math.sqrt((count > 1) ? newVar / (count - 1) : 0.0);
-        double mean = (count > 0) ? newMean : 0.0;
-
-        // Three-sigma rule of thumb.
-        // https://en.wikipedia.org/wiki/68%E2%80%9395%E2%80%9399.7_rule
-        return Duration.ofMillis((long) Math.max(0, mean + (3*stddev)));
+        return duration;
     }
 
     /**
@@ -60,20 +57,12 @@ public class UnavailabilityDuration {
      * Flags that the last unavailability period has ended.
      */
     synchronized void end() {
-        // Fast and more accurate (compared to the naive approach) way of computing variance. Proposed by
-        // B. P. Welford and presented in Donald Knuth’s Art of Computer Programming, Vol 2, page 232, 3rd
-        // edition.
-        // Another explanation: https://www.embeddedrelated.com/showarticle/785.php
+        long durationMillis = clock.millis() - startTime;
+        past[(int)(count%HISTORY_SIZE)] = durationMillis;
+        long max = past[0];
+        for (int i=1; i < past.length; i++) if (past[i] > max) max = past[i];
+        duration = Duration.ofMillis((long) (max * SAFETY_FACTOR));
         count++;
-        double value = clock.millis() - startTime;
-        if (count == 1) {
-            oldMean = newMean = value;
-            oldVar = 0.0;
-        } else {
-            newMean = oldMean + (value - oldMean) / count;
-            newVar = oldVar + (value - oldMean) * (value - newMean);
-            oldMean = newMean;
-            oldVar = newVar;
-        }
     }
 }
+

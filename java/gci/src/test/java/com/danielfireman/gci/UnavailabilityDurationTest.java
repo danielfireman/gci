@@ -52,7 +52,7 @@ public class UnavailabilityDurationTest {
         duration.end();
         duration.begin();
         duration.end();
-        assertEquals(18, duration.estimate().toMillis());
+        assertEquals(21, duration.estimate().toMillis());
 
         verify(clock, times(4)).millis();
     }
