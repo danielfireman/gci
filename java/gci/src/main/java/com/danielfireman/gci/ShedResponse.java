@@ -19,8 +19,14 @@ public class ShedResponse {
      */
     public boolean shouldShed;
 
-    public ShedResponse(boolean shouldShed, Duration unavailabilityDuration) {
+    /**
+     * Request start time in milliseconds since epoch.
+     */
+    public long startTimeMillis;
+
+    public ShedResponse(boolean shouldShed, Duration unavailabilityDuration, long startTimeMillis) {
         this.unavailabilityDuration = unavailabilityDuration;
         this.shouldShed = shouldShed;
+        this.startTimeMillis = startTimeMillis;
     }
 }

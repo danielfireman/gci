@@ -1,5 +1,6 @@
 package com.danielfireman.gci;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -17,7 +18,7 @@ public class GarbageCollectorControlInterceptor {
     private static final float SHEDDING_THRESHOLD = 0.50f;
     private static final long SAMPLE_RATE = 3L;
     private static final Duration WAIT_FOR_TRAILERS_SLEEP_MILLIS = Duration.ofMillis(10);
-    private static final ShedResponse PROCESS_REQUEST = new ShedResponse(false, null);
+    private final Clock clock;
     AtomicBoolean doingGC = new AtomicBoolean(false);  // Package private to make testing easier.
     private AtomicLong incoming = new AtomicLong();
     private AtomicLong finished = new AtomicLong();
@@ -33,16 +34,19 @@ public class GarbageCollectorControlInterceptor {
      * @param executor               thread pool used to trigger/control garbage collection.
      * @param collector              Garbage collector to be triggered by the control interceptor.
      * @param unavailabilityDuration Keeps track and estimates unavailability periods.
+     * @param clock                  System clock used to find the time.
      */
     public GarbageCollectorControlInterceptor(
             HeapMonitor monitor,
             GarbageCollector collector,
             Executor executor,
-            UnavailabilityDuration unavailabilityDuration) {
+            UnavailabilityDuration unavailabilityDuration,
+            Clock clock) {
         this.monitor = monitor;
         this.collector = collector;
         this.executor = executor;
         this.unavailabilityDuration = unavailabilityDuration;
+        this.clock = clock;
     }
 
     /**
@@ -52,26 +56,31 @@ public class GarbageCollectorControlInterceptor {
      * @see System#gc()
      * @see Executors#newSingleThreadExecutor()
      * @see UnavailabilityDuration
+     * @see Clock#systemDefaultZone()
      */
     public GarbageCollectorControlInterceptor() {
-        this(new HeapMonitor(), () -> System.gc(), Executors.newSingleThreadExecutor(), new UnavailabilityDuration());
+        this(new HeapMonitor(),
+                () -> System.gc(),
+                Executors.newSingleThreadExecutor(),
+                new UnavailabilityDuration(),
+                Clock.systemDefaultZone());
     }
 
-    private static ShedResponse shedRequest(Duration unavailabilityDuration) {
-        return new ShedResponse(true, unavailabilityDuration);
+    private ShedResponse shedRequest(Duration unavailabilityDuration) {
+        return new ShedResponse(true, unavailabilityDuration, clock.millis());
     }
 
     public ShedResponse before() {
         incoming.incrementAndGet();
         if (doingGC.get()) {
-            return shedRequest(unavailabilityDuration.estimate());
+            return shedRequest(unavailabilityDuration.estimate(finished.get() - incoming.get()));
         }
         if (incoming.get() % SAMPLE_RATE == 0) {
             HeapMonitor.Usage usage = monitor.getUsage();
             if (usage.tenured > SHEDDING_THRESHOLD || usage.young > SHEDDING_THRESHOLD) {
                 synchronized (this) {
                     if (doingGC.get()) {
-                        return shedRequest(unavailabilityDuration.estimate());
+                        return shedRequest(unavailabilityDuration.estimate(finished.get() - incoming.get()));
                     }
                     doingGC.set(true);
                 }
@@ -92,13 +101,16 @@ public class GarbageCollectorControlInterceptor {
                     unavailabilityDuration.end();
                     doingGC.set(false);
                 });
-                return shedRequest(unavailabilityDuration.estimate());
+                return shedRequest(unavailabilityDuration.estimate(finished.get() - incoming.get()));
             }
         }
-        return PROCESS_REQUEST;
+        return new ShedResponse(false, null, clock.millis());
     }
 
     public void after(ShedResponse response) {
         finished.incrementAndGet();
+        if (!response.shouldShed) {
+            unavailabilityDuration.requestFinished(response.startTimeMillis);
+        }
     }
 }
