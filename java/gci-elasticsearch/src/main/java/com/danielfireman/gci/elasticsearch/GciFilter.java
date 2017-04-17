@@ -6,6 +6,7 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilterChain;
 import org.elasticsearch.common.inject.Inject;
@@ -38,9 +39,22 @@ public class GciFilter implements ActionFilter {
         }
         // Only shed what is needed.
         ShedResponse shedResponse = gci.before();
+        ActionListener<Response> l = new ActionListener<Response>() {
+            @Override
+            public void onResponse(Response response) {
+                gci.after(shedResponse);
+                listener.onResponse(response);
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                gci.after(shedResponse);
+                listener.onFailure(e);
+            }
+        };
+
         if (!shedResponse.shouldShed) {
-            chain.proceed(task, action, request, listener);
-            gci.after(shedResponse);
+            chain.proceed(task, action, request, l);
             return;
         }
         // If there is any problem getting the channel from threadlocal.
@@ -49,7 +63,7 @@ public class GciFilter implements ActionFilter {
         RestChannel channel = ThreadRepo.channel.get();
         if (channel == null) {
             System.out.println("Null channel");
-            chain.proceed(task, action, request, listener);
+            chain.proceed(task, action, request, l);
             gci.after(shedResponse);
             return;
         }

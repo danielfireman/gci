@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author danielfireman
  */
 public class GarbageCollectorControlInterceptor {
-    private static final float SHEDDING_THRESHOLD = 0.50f;
+    private static final float SHEDDING_THRESHOLD = 0.95f;
     private static final long SAMPLE_RATE = 3L;
     private static final Duration WAIT_FOR_TRAILERS_SLEEP_MILLIS = Duration.ofMillis(10);
     private final Clock clock;
@@ -63,7 +63,7 @@ public class GarbageCollectorControlInterceptor {
                 () -> System.gc(),
                 Executors.newSingleThreadExecutor(),
                 new UnavailabilityDuration(),
-                Clock.systemDefaultZone());
+                Clock.systemUTC());
     }
 
     private ShedResponse shedRequest(Duration unavailabilityDuration) {
@@ -110,7 +110,7 @@ public class GarbageCollectorControlInterceptor {
     public void after(ShedResponse response) {
         finished.incrementAndGet();
         if (!response.shouldShed) {
-            unavailabilityDuration.requestFinished(response.startTimeMillis);
+            unavailabilityDuration.requestFinished(clock.millis()-response.startTimeMillis);
         }
     }
 }
