@@ -21,7 +21,6 @@ public class UnavailabilityDuration {
     private long requestCount;
     private long gcEstimation, requestDurationEstimation;
 
-
     /**
      * Creates a new {@link UnavailabilityDuration} instance.
      *

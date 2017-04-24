@@ -6,6 +6,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Garbage Collector Control Interceptor (GCI).
@@ -15,8 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author danielfireman
  */
 public class GarbageCollectorControlInterceptor {
-    private static final float SHEDDING_THRESHOLD = 0.95f;
-    private static final long SAMPLE_RATE = 3L;
+    private static final float SHEDDING_THRESHOLD = 0.90f;
     private static final Duration WAIT_FOR_TRAILERS_SLEEP_MILLIS = Duration.ofMillis(10);
     private final Clock clock;
     AtomicBoolean doingGC = new AtomicBoolean(false);  // Package private to make testing easier.
@@ -26,6 +26,15 @@ public class GarbageCollectorControlInterceptor {
     private GarbageCollector collector;
     private Executor executor;
     private UnavailabilityDuration unavailabilityDuration;
+    private int sampleCount = 0;
+    private long lastFinished = 0;
+    private AtomicInteger sampleRate = new AtomicInteger(DEFAULT_SAMPLE_RATE);
+    private int[] pastSampleRates = {Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE};
+    // Default sample rate should be fairly small, so big requests get checked up quickly.
+    private static final int DEFAULT_SAMPLE_RATE = 10;
+    // Max sample rate can not be very big because of peaks.
+    // The algorithm is fairly conservative, but we never know.
+    private static final int MAX_SAMPLE_RATE = 50;
 
     /**
      * Creates a new instance of {@code GarbageCollectorControlInterceptor}
@@ -75,19 +84,30 @@ public class GarbageCollectorControlInterceptor {
         if (doingGC.get()) {
             return shedRequest(unavailabilityDuration.estimate(finished.get() - incoming.get()));
         }
-        if (incoming.get() % SAMPLE_RATE == 0) {
+        if (incoming.get() % sampleRate.get() == 0) {
             HeapMonitor.Usage usage = monitor.getUsage();
             if (usage.tenured > SHEDDING_THRESHOLD || usage.young > SHEDDING_THRESHOLD) {
+		// Note: Please, be kind and keep the following synchronized block small.
                 synchronized (this) {
                     if (doingGC.get()) {
                         return shedRequest(unavailabilityDuration.estimate(finished.get() - incoming.get()));
                     }
                     doingGC.set(true);
+                    lastFinished = (int)finished.get();
                 }
                 executor.execute(() -> {
-                    // Deliberately counting the time waiting for trailer requests
-                    // as unavailability time.
-                    unavailabilityDuration.begin();
+		    // Being conservative here. Picking up the minimum value among last sample rates.
+                    if (sampleCount > 0) {
+			    int lastWindow = (int)(finished.get() - lastFinished);
+			    pastSampleRates[sampleCount % pastSampleRates.length] = lastWindow;
+			    long min = pastSampleRates[0];
+			    for (int i = 1; i < pastSampleRates.length; i++) {
+				if (pastSampleRates[i] < min) min = pastSampleRates[i];
+			    }
+		    	    sampleCount++;
+			    sampleRate.set((int)Math.min(min, MAX_SAMPLE_RATE));  
+		    }
+
                     // Loop waiting for the queue to get empty.
                     while (finished.get() < incoming.get()) {
                         try {
@@ -97,6 +117,7 @@ public class GarbageCollectorControlInterceptor {
                         }
                     }
                     // Finally, collect the garbage.
+                    unavailabilityDuration.begin();
                     collector.collect();
                     unavailabilityDuration.end();
                     doingGC.set(false);
