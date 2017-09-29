@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author danielfireman
  */
 public class GarbageCollectorControlInterceptor {
-    private static final float SHEDDING_THRESHOLD = 0.90f;
+    private static final float SHEDDING_THRESHOLD = System.getenv("GCI_SHEDDING_THRESHOLD") == null ? 0.9f : Float.parseFloat(System.getenv("GCI_SHEDDING_THRESHOLD"));
     private static final Duration WAIT_FOR_TRAILERS_SLEEP_MILLIS = Duration.ofMillis(10);
     private final Clock clock;
     AtomicBoolean doingGC = new AtomicBoolean(false);  // Package private to make testing easier.
@@ -34,7 +34,11 @@ public class GarbageCollectorControlInterceptor {
     private static final int DEFAULT_SAMPLE_RATE = 10;
     // Max sample rate can not be very big because of peaks.
     // The algorithm is fairly conservative, but we never know.
-    private static final int MAX_SAMPLE_RATE = 50;
+    private static final int MAX_SAMPLE_RATE = 30;
+
+    static {
+        System.out.format("GCI_SHEDDING_THRESHOLD: %f\n", SHEDDING_THRESHOLD);
+    }
 
     /**
      * Creates a new instance of {@code GarbageCollectorControlInterceptor}
